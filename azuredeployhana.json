@@ -1,0 +1,173 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "client_name": {
+            "type": "String",
+            "metadata": {
+                "description": "Client name to be used in resource names. Required, does not have default values"
+            }
+        },
+        "app_name_prefix": {
+            "defaultValue": "appName",
+            "type": "String"
+        },
+        "environment_name": {
+            "defaultValue": "dev",
+            "type": "String",
+            "allowedValues": [ "dev", "prod", "test" ],
+            "metadata": {
+                "description": "Allowed values: dev, test or prod, defaults to dev"
+            }
+        },
+        "name_prefix": {
+            "type": "string",
+            "defaultValue": "hana",
+            "metadata": {
+                "description": "Prefix for all resources name, defaults to hana"
+            }
+        },
+        "bot_cost_group": {
+            "type": "string",
+            "defaultValue": "F0",
+            "allowedValues":["F0","S1"],
+            "metadata": {
+                "description": "F0 for free or S1 for tier 1, defaults to F0"
+            }
+        },
+        "bot_icon_url": {
+            "defaultValue": "https://docs.botframework.com/static/devportal/client/images/bot-framework-default.png",
+            "type": "String"
+        },
+        "location":{
+            "defaultValue":"westeurope",
+            "type": "string",
+            "metadata": {
+                "description": "Location for resources, defaults to westeurope"
+            }
+        },
+        "hosting_plan_name": 
+        {
+            "type": "string",
+            "defaultValue": "[concat('asp-',toUpper(parameters('name_prefix')),'-',parameters('environment_name'))]",
+            "metadata": {
+                "description": "Hosting plan for web app, defaults to asp-name_prefix-environment_name, e.g. asp-HANA-dev"
+            }
+        }
+    },
+    "variables": {
+        "api_version_MSI": "2022-01-31-preview",
+        "api_version_bot": "2022-06-15-preview",
+        "api_version_app": "2022-03-01",
+        "bot_name_concatenated": "[concat(parameters('name_prefix'),'-',parameters('client_name'),'-',parameters('environment_name'))]",
+        "app_name_concatenated": "[concat(toUpper(parameters('name_prefix')),'-',parameters('client_name'),'-',parameters('environment_name'))]",
+        "subscription_id":"[subscription().subscriptionId]",
+        "resource_group_id":"[resourceGroup().id]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "apiVersion": "[variables('api_version_MSI')]",
+            "name": "[variables('bot_name_concatenated')]",
+            "location": "[parameters('location')]"
+        },
+        {
+            "type": "Microsoft.BotService/botServices",
+            "apiVersion": "[variables('api_version_bot')]",
+            "name": "[variables('bot_name_concatenated')]",
+            "location": "global",
+            "sku": {
+                "name": "[parameters('bot_cost_group')]"
+            },
+            "tags": {
+                "CostCenter": "Automation"
+            },
+            "kind": "azurebot",
+            "properties": {
+                "displayName": "[variables('bot_name_concatenated')]",
+                "iconUrl": "[parameters('bot_icon_url')]",
+                "endpoint": "[concat('https://',variables('app_name_concatenated'),'.azurewebsites.net/api/messages')]",
+                "msaAppTenantId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('bot_name_concatenated')),variables('api_version_MSI')).tenantId]",
+                "msaAppType": "UserAssignedMSI",
+                "msaAppId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('bot_name_concatenated')),variables('api_version_MSI')).clientId]",
+                "msaAppMSIResourceId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('bot_name_concatenated'))]",
+                "isStreamingSupported": false,
+                "schemaTransformationVersion": "1.3",
+                "tenantId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('bot_name_concatenated')),variables('api_version_MSI')).tenantId]",
+                "isCmekEnabled": false,
+                "disableLocalAuth": false
+            }
+        },
+        {
+            "type": "Microsoft.BotService/botServices/channels",
+            "apiVersion": "2022-06-15-preview",
+            "name": "[concat(variables('bot_name_concatenated'), '/DirectLineChannel')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.BotService/botServices', variables('bot_name_concatenated'))]"
+            ],
+            "properties": {
+                "properties": {
+                    "sites": [
+                        {
+                            "siteName": "Default_Site",
+                            "isEnabled": true,
+                            "isV1Enabled": true,
+                            "isV3Enabled": true,
+                            "isSecureSiteEnabled": false,
+                            "isBlockUserUploadEnabled": false
+                        }
+                    ]
+                },
+                "channelName": "DirectLineChannel",
+                "location": "global"
+            }
+        },
+
+        {
+            "type": "Microsoft.BotService/botServices/channels",
+            "apiVersion": "[variables('api_version_bot')]",
+            "name": "[concat(variables('bot_name_concatenated'), '/WebChatChannel')]",
+            "location": "global",
+            "dependsOn": [
+                "[resourceId('Microsoft.BotService/botServices', variables('bot_name_concatenated'))]"
+            ],
+            "properties": {
+                "properties": {
+                    "sites": [
+                        {
+                            "siteName": "Default Site",
+                            "isEnabled": true,
+                            "isWebchatPreviewEnabled": true,
+                            "isBlockUserUploadEnabled": false
+                        }
+                    ]
+                },
+                "channelName": "WebChatChannel",
+                "location": "global"
+            }
+        },
+        {
+            "apiVersion": "[variables('api_version_app')]",
+            "name": "[variables('app_name_concatenated')]",
+            "type": "Microsoft.Web/sites",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "Website",
+                "hidden-related:/subscriptions/4e01308c-4a2c-4bd0-8d80-8ebe2750ed77/resourceGroups/srv-test-hanabot-we/providers/Microsoft.Web/serverfarms/asp-HANA-test": "Resource"
+            },
+            "properties": {
+                "serverFarmId": "[concat('/subscriptions/', variables('subscription_id'),'/resourcegroups/', variables('resource_group_id'), '/providers/Microsoft.Web/serverfarms/', parameters('hosting_plan_name'))]",
+                "clientAffinityEnabled": true,
+                "virtualNetworkSubnetId": null,
+                "httpsOnly": true
+            }
+        }
+    ],
+    "outputs": {
+        "botAppId": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('bot_name_concatenated')),variables('api_version_MSI')).clientId]"
+        }
+    }
+}
